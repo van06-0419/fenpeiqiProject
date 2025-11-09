@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <new>
+#include <algorithm>
 
 // A small pool allocator that supports:
 // - constructor(initial_capacity) to reserve elements
@@ -25,16 +26,26 @@ public:
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
 
+    // required for std allocator compatibility
     template <class U> struct rebind { using other = PoolAllocator<U>; };
 
+    // default ctor: optional initial capacity in elements
     PoolAllocator(size_type initial_capacity = 0) noexcept {
         if (initial_capacity > 0) reserve(initial_capacity);
     }
 
-    // copy ctor - stateful: create empty allocator except when copying manually
+    // copy ctor for same-T (stateful: we do NOT duplicate blocks)
     PoolAllocator(const PoolAllocator& other) noexcept {
-        // intentionally leave empty: copying allocator does NOT duplicate blocks
-        // This is a design choice: container copy semantics control propagation.
+        // Intentionally do not copy blocks; allocator copies are shallow
+        // This design follows the simple demo semantics.
+    }
+
+    // conversion ctor: allow construction from allocator of different value_type
+    // This is crucial: std containers will do allocator_type(other_allocator) internally.
+    template <class U>
+    PoolAllocator(const PoolAllocator<U>&) noexcept {
+        // Intentionally empty: do not copy state between different typed allocators.
+        // Presence of this ctor enables rebind/conversion in containers like std::map.
     }
 
     // move ctor
@@ -70,15 +81,12 @@ public:
             ++used_slots;
             return reinterpret_cast<pointer>(s);
         } else {
-            // For simplicity, for n>1 allocate raw memory with malloc/new
-            // but we will try to allocate a contiguous memory block from a new block
-            // We allocate a dedicated block large enough for n elements
+            // For simplicity, for n>1 allocate raw memory via malloc
+            // and record it in large_allocs to free later.
             size_type bytes = n * sizeof(T);
             void* p = std::malloc(bytes);
             if (!p) throw std::bad_alloc();
-            // store pointer in allocated_chunks to free later
             large_allocs.push_back(p);
-            // Note: we don't track per-element free in this path
             return reinterpret_cast<pointer>(p);
         }
     }
@@ -98,7 +106,7 @@ public:
                 std::free(*it);
                 large_allocs.erase(it);
             } else {
-                // unknown pointer - ignore or crash
+                // unknown pointer - ignore
             }
         }
     }
@@ -119,7 +127,9 @@ public:
         total_slots = used_slots = 0;
     }
 
-    // comparison operators required by some containers (stateful)
+    // comparison operators (allocator equality semantics)
+    // For stateful allocators, some containers check allocator propagation.
+    // Here we define equality as address-equality of the allocator object (conservative).
     bool operator==(const PoolAllocator& other) const noexcept { return this == &other; }
     bool operator!=(const PoolAllocator& other) const noexcept { return !(*this == other); }
 
