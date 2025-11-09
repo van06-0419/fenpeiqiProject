@@ -1,8 +1,8 @@
 #include <iostream>
 #include <map>
 #include <functional>
-#include "../include/pool_allocator.hpp"
-#include "../include/simple_seq.hpp"
+#include "../include/poolAllocator.hpp"
+#include "../include/simpleSeq.hpp"
 
 using namespace std;
 
